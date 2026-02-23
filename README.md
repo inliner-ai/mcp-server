@@ -74,9 +74,9 @@ Add to Cursor Settings > Features > MCP, or VS Code MCP settings:
 
 | Tool | Description |
 |------|-------------|
-| `generate_image_url` | Build a properly formatted Inliner image URL from description, dimensions, and project |
-| `generate_image` | Generate an image, poll until ready, and optionally save to a local file (inline mode) |
-| `create_image` | Quick alias for generating images with sensible defaults (800x600 PNG) - simpler interface |
+| `generate_image_url` | Build a properly formatted Inliner image URL from description, dimensions, and project (smart URL slug recommendation by default) |
+| `generate_image` | Generate an image with full prompt + concise smart slug, and optionally save to a local file |
+| `create_image` | Quick alias for generating images with sensible defaults (800x600 PNG) with smart slug recommendation |
 | `edit_image` | Edit an existing image by URL **or** upload a local image, apply edit instructions, optionally resize, and save to a local file |
 | `get_projects` | List all your Inliner projects with namespaces and settings |
 | `create_project` | Create a new project (reserves namespace like 'my-project' for your account) |
@@ -106,6 +106,11 @@ The agent will:
 1. Call `get_project_details` to get your project config
 2. Call `generate_image_url` with the right namespace and dimensions
 3. Output the `<img>` tag with the correct URL, alt text, and loading attributes
+
+Smart URL behavior:
+- The server recommends concise slugs using `POST /url/recommend`
+- Then generates with full prompt context using `POST /content/generate` and the selected slug
+- This preserves rich prompt quality while producing readable/SEO-friendly URL paths
 
 > "Generate a happy duck image and save it to ./images/duck.png"
 

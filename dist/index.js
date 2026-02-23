@@ -31,6 +31,91 @@ async function apiFetch(path, apiKey, options) {
     }
     return res.json();
 }
+function sanitizeSlug(text) {
+    return text
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 100);
+}
+function parseDataUrlToBuffer(dataUrl) {
+    if (!dataUrl || typeof dataUrl !== "string")
+        return null;
+    if (!dataUrl.startsWith("data:"))
+        return null;
+    const parts = dataUrl.split(",", 2);
+    if (parts.length !== 2 || !parts[1])
+        return null;
+    return Buffer.from(parts[1], "base64");
+}
+async function recommendSmartSlug(project, prompt, width, height, extension, apiKey) {
+    try {
+        return await apiFetch("url/recommend", apiKey, {
+            method: "POST",
+            body: JSON.stringify({
+                prompt,
+                project,
+                width,
+                height,
+                extension,
+            }),
+        });
+    }
+    catch {
+        return null;
+    }
+}
+async function generateContentWithSmartSlug(project, prompt, width, height, format, apiKey, smartUrl = true) {
+    const recommendation = smartUrl
+        ? await recommendSmartSlug(project, prompt, width, height, format, apiKey)
+        : null;
+    const fallbackSlug = sanitizeSlug(prompt);
+    const selectedSlug = recommendation?.recommendedSlug || fallbackSlug;
+    const generationResponse = await apiFetch("content/generate", apiKey, {
+        method: "POST",
+        body: JSON.stringify({
+            prompt,
+            project,
+            slug: selectedSlug,
+            width,
+            height,
+            extension: format,
+        }),
+    });
+    const contentPath = typeof generationResponse?.prompt === "string" && generationResponse.prompt.length > 0
+        ? generationResponse.prompt.replace(/^\//, "")
+        : `${project}/${selectedSlug}.${format}`;
+    const url = `${IMG_BASE}/${contentPath}`;
+    const html = `<img src="${url}" alt="${prompt.replace(/-/g, " ")}" width="${width}" height="${height}" loading="lazy" />`;
+    const inlineData = parseDataUrlToBuffer(generationResponse?.mediaAsset?.data);
+    if (inlineData) {
+        return {
+            url,
+            html,
+            imageBuffer: inlineData,
+            contentPath,
+            recommendedSlug: recommendation?.recommendedSlug,
+            alternativeSlugs: recommendation?.alternativeSlugs || [],
+        };
+    }
+    const fetched = await fetch(url, {
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+        },
+    });
+    if (!fetched.ok) {
+        throw new Error(`Failed to fetch generated image (${fetched.status}) from ${url}`);
+    }
+    return {
+        url,
+        html,
+        imageBuffer: Buffer.from(await fetched.arrayBuffer()),
+        contentPath,
+        recommendedSlug: recommendation?.recommendedSlug,
+        alternativeSlugs: recommendation?.alternativeSlugs || [],
+    };
+}
 // --- Server setup ---
 const server = new mcp_js_1.McpServer({
     name: "inliner",
@@ -38,7 +123,7 @@ const server = new mcp_js_1.McpServer({
 });
 const apiKey = getApiKey();
 // --- Tools ---
-server.tool("generate_image_url", "Build a properly formatted Inliner.ai image URL from a description, dimensions, and project namespace", {
+server.tool("generate_image_url", "Build a properly formatted Inliner.ai image URL from a description and project namespace (uses smart URL recommendation by default)", {
     project: zod_1.z
         .string()
         .describe("Project namespace from Inliner dashboard (e.g. 'my-project')"),
@@ -59,37 +144,42 @@ server.tool("generate_image_url", "Build a properly formatted Inliner.ai image U
         .enum(["png", "jpg"])
         .default("png")
         .describe("Image format: png (transparency) or jpg (photos)"),
+    smartUrl: zod_1.z
+        .boolean()
+        .default(true)
+        .describe("Use smart URL recommendation for concise, SEO-friendly slugs"),
     edit: zod_1.z
         .string()
         .optional()
         .describe("Optional edit instruction to apply to an existing image (e.g. 'make-background-blue')"),
-}, async ({ project, description, width, height, format, edit }) => {
-    const sanitized = description
-        .toLowerCase()
-        .replace(/[^a-z0-9-]/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 100);
-    let url = `${IMG_BASE}/${project}/${sanitized}_${width}x${height}`;
+}, async ({ project, description, width, height, format, smartUrl, edit }) => {
+    const recommendation = smartUrl
+        ? await recommendSmartSlug(project, description, width, height, format, apiKey)
+        : null;
+    const fallbackSlug = sanitizeSlug(description);
+    const selectedSlug = recommendation?.recommendedSlug || fallbackSlug;
+    let url = recommendation?.fullUrl || `${IMG_BASE}/${project}/${selectedSlug}.${format}`;
     if (edit) {
-        const sanitizedEdit = edit
-            .toLowerCase()
-            .replace(/[^a-z0-9-]/g, "-")
-            .replace(/-+/g, "-");
-        url += `/${sanitizedEdit}`;
+        const sanitizedEdit = sanitizeSlug(edit);
+        url += `/${sanitizedEdit}.${format}`;
     }
-    url += `.${format}`;
     const html = `<img src="${url}" alt="${description.replace(/-/g, " ")}" width="${width}" height="${height}" loading="lazy" />`;
     return {
         content: [
             {
                 type: "text",
-                text: JSON.stringify({ url, html }, null, 2),
+                text: JSON.stringify({
+                    url,
+                    html,
+                    smartUrlUsed: smartUrl,
+                    recommendedSlug: recommendation?.recommendedSlug || selectedSlug,
+                    alternativeSlugs: recommendation?.alternativeSlugs || [],
+                }, null, 2),
             },
         ],
     };
 });
-server.tool("generate_image", "Generate an image and optionally save it to a local file. Polls until generation is complete (up to 3 minutes).", {
+server.tool("generate_image", "Generate an image and optionally save it to a local file. Uses smart URL recommendation by default.", {
     project: zod_1.z
         .string()
         .describe("Project namespace from Inliner dashboard (e.g. 'my-project')"),
@@ -114,78 +204,12 @@ server.tool("generate_image", "Generate an image and optionally save it to a loc
         .string()
         .optional()
         .describe("Optional local file path to save the image (e.g. './images/hero.png')"),
-}, async ({ project, description, width, height, format, outputPath }) => {
-    const sanitized = description
-        .toLowerCase()
-        .replace(/[^a-z0-9-]/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 100);
-    const url = `${IMG_BASE}/${project}/${sanitized}_${width}x${height}.${format}`;
-    const pathPart = `${project}/${sanitized}_${width}x${height}.${format}`;
-    const pollUrl = `${API_BASE}/content/request-json/${pathPart}`;
-    // Poll until image is ready (max 3 minutes)
-    const maxAttempts = 60;
-    let attempt = 0;
-    let imageBuffer = null;
-    let status = "PENDING";
-    while (attempt < maxAttempts) {
-        try {
-            const pollRes = await fetch(pollUrl, {
-                headers: {
-                    Authorization: `Bearer ${apiKey}`,
-                },
-            });
-            if (pollRes.ok) {
-                const pollData = await pollRes.json();
-                // Check if image is ready - the API returns mediaAsset.data when complete
-                if (pollData.mediaAsset && pollData.mediaAsset.data) {
-                    // Extract base64 data from data URL
-                    const dataUrl = pollData.mediaAsset.data;
-                    if (dataUrl.startsWith("data:")) {
-                        // Base64 data URL format: data:image/png;base64,<data>
-                        const base64Data = dataUrl.split(",")[1];
-                        imageBuffer = Buffer.from(base64Data, "base64");
-                        break;
-                    }
-                    else {
-                        // If it's a regular URL, fetch it
-                        const imgRes = await fetch(dataUrl);
-                        const arrayBuffer = await imgRes.arrayBuffer();
-                        imageBuffer = Buffer.from(arrayBuffer);
-                        break;
-                    }
-                }
-                // Check for error status (though API may return 202 for pending)
-                if (pollRes.status === 202) {
-                    // 202 Accepted - still processing
-                    status = "PENDING";
-                }
-                else if (pollRes.status >= 400) {
-                    throw new Error(`API error ${pollRes.status}: ${JSON.stringify(pollData)}`);
-                }
-            }
-            else if (pollRes.status === 202) {
-                // 202 Accepted - still processing, continue polling
-                status = "PENDING";
-            }
-            else {
-                throw new Error(`API error ${pollRes.status}: ${await pollRes.text()}`);
-            }
-        }
-        catch (err) {
-            if (status === "FAILED") {
-                throw err;
-            }
-            // Continue polling on transient errors
-        }
-        attempt++;
-        await new Promise((resolve) => setTimeout(resolve, 3000)); // Wait 3 seconds
-    }
-    if (!imageBuffer) {
-        throw new Error(`Image generation timeout after ${maxAttempts * 3} seconds. URL: ${url}`);
-    }
-    // Save to file if outputPath is provided
+    smartUrl: zod_1.z
+        .boolean()
+        .default(true)
+        .describe("Use smart URL recommendation for concise, readable slugs"),
+}, async ({ project, description, width, height, format, outputPath, smartUrl }) => {
+    const generated = await generateContentWithSmartSlug(project, description, width, height, format, apiKey, smartUrl);
     if (outputPath) {
         const fs = await import("fs/promises");
         const path = await import("path");
@@ -193,25 +217,27 @@ server.tool("generate_image", "Generate an image and optionally save it to a loc
         const dir = path.dirname(outputPath);
         await fs.mkdir(dir, { recursive: true });
         // Write file
-        await fs.writeFile(outputPath, imageBuffer);
+        await fs.writeFile(outputPath, generated.imageBuffer);
     }
-    const html = `<img src="${url}" alt="${description.replace(/-/g, " ")}" width="${width}" height="${height}" loading="lazy" />`;
     return {
         content: [
             {
                 type: "text",
                 text: JSON.stringify({
-                    url,
-                    html,
+                    url: generated.url,
+                    html: generated.html,
                     saved: outputPath ? true : false,
                     outputPath: outputPath || null,
-                    size: imageBuffer.byteLength,
+                    size: generated.imageBuffer.byteLength,
+                    smartUrlUsed: smartUrl,
+                    recommendedSlug: generated.recommendedSlug || null,
+                    alternativeSlugs: generated.alternativeSlugs || [],
                 }, null, 2),
             },
         ],
     };
 });
-server.tool("create_image", "Quick alias for generating images with sensible defaults. Generates an 800x600 PNG image by default, polls until ready, and optionally saves to a local file.", {
+server.tool("create_image", "Quick alias for generating images with sensible defaults. Uses smart URL recommendation by default.", {
     description: zod_1.z
         .string()
         .describe("Image description (e.g., 'happy-duck', 'modern-office-hero')"),
@@ -242,7 +268,12 @@ server.tool("create_image", "Quick alias for generating images with sensible def
         .string()
         .optional()
         .describe("Optional local file path to save the image (e.g., './images/hero.png')"),
-}, async ({ description, project, width = 800, height = 600, format = "png", outputPath }) => {
+    smartUrl: zod_1.z
+        .boolean()
+        .default(true)
+        .optional()
+        .describe("Use smart URL recommendation for concise, readable slugs"),
+}, async ({ description, project, width = 800, height = 600, format = "png", outputPath, smartUrl = true }) => {
     // If no project specified, get the first available project
     let resolvedProject = project;
     if (!resolvedProject) {
@@ -259,77 +290,8 @@ server.tool("create_image", "Quick alias for generating images with sensible def
             resolvedProject = "default";
         }
     }
-    // Use generate_image logic
-    const sanitized = description
-        .toLowerCase()
-        .replace(/[^a-z0-9-]/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 100);
-    const url = `${IMG_BASE}/${resolvedProject}/${sanitized}_${width}x${height}.${format}`;
-    const pathPart = `${resolvedProject}/${sanitized}_${width}x${height}.${format}`;
-    const pollUrl = `${API_BASE}/content/request-json/${pathPart}`;
-    // Poll until image is ready (max 3 minutes)
-    const maxAttempts = 60;
-    let attempt = 0;
-    let imageBuffer = null;
-    let status = "PENDING";
-    while (attempt < maxAttempts) {
-        try {
-            const pollRes = await fetch(pollUrl, {
-                headers: {
-                    Authorization: `Bearer ${apiKey}`,
-                },
-            });
-            if (pollRes.ok) {
-                const pollData = await pollRes.json();
-                // Check if image is ready - the API returns mediaAsset.data when complete
-                if (pollData.mediaAsset && pollData.mediaAsset.data) {
-                    // Extract base64 data from data URL
-                    const dataUrl = pollData.mediaAsset.data;
-                    if (dataUrl.startsWith("data:")) {
-                        // Base64 data URL format: data:image/png;base64,<data>
-                        const base64Data = dataUrl.split(",")[1];
-                        imageBuffer = Buffer.from(base64Data, "base64");
-                        break;
-                    }
-                    else {
-                        // If it's a regular URL, fetch it
-                        const imgRes = await fetch(dataUrl);
-                        const arrayBuffer = await imgRes.arrayBuffer();
-                        imageBuffer = Buffer.from(arrayBuffer);
-                        break;
-                    }
-                }
-                // Check for error status (though API may return 202 for pending)
-                if (pollRes.status === 202) {
-                    // 202 Accepted - still processing
-                    status = "PENDING";
-                }
-                else if (pollRes.status >= 400) {
-                    throw new Error(`API error ${pollRes.status}: ${JSON.stringify(pollData)}`);
-                }
-            }
-            else if (pollRes.status === 202) {
-                // 202 Accepted - still processing, continue polling
-                status = "PENDING";
-            }
-            else {
-                throw new Error(`API error ${pollRes.status}: ${await pollRes.text()}`);
-            }
-        }
-        catch (err) {
-            if (status === "FAILED") {
-                throw err;
-            }
-            // Continue polling on transient errors
-        }
-        attempt++;
-        await new Promise((resolve) => setTimeout(resolve, 3000)); // Wait 3 seconds
-    }
-    if (!imageBuffer) {
-        throw new Error(`Image generation timeout after ${maxAttempts * 3} seconds. URL: ${url}`);
-    }
+    const finalProject = resolvedProject || "default";
+    const generated = await generateContentWithSmartSlug(finalProject, description, width, height, format, apiKey, smartUrl);
     // Save to file if outputPath is provided
     if (outputPath) {
         const fs = await import("fs/promises");
@@ -338,20 +300,22 @@ server.tool("create_image", "Quick alias for generating images with sensible def
         const dir = path.dirname(outputPath);
         await fs.mkdir(dir, { recursive: true });
         // Write file
-        await fs.writeFile(outputPath, imageBuffer);
+        await fs.writeFile(outputPath, generated.imageBuffer);
     }
-    const html = `<img src="${url}" alt="${description.replace(/-/g, " ")}" width="${width}" height="${height}" loading="lazy" />`;
     return {
         content: [
             {
                 type: "text",
                 text: JSON.stringify({
-                    url,
-                    html,
+                    url: generated.url,
+                    html: generated.html,
                     saved: outputPath ? true : false,
                     outputPath: outputPath || null,
-                    size: imageBuffer.byteLength,
-                    project: resolvedProject,
+                    size: generated.imageBuffer.byteLength,
+                    project: finalProject,
+                    smartUrlUsed: smartUrl,
+                    recommendedSlug: generated.recommendedSlug || null,
+                    alternativeSlugs: generated.alternativeSlugs || [],
                 }, null, 2),
             },
         ],
