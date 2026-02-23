@@ -1,0 +1,48 @@
+{
+  "name": "@inliner/mcp-server",
+  "version": "1.0.22",
+  "description": "MCP server for Inliner.ai — gives AI coding agents live access to your image projects, credits, and generation",
+  "main": "dist/index.js",
+  "bin": {
+    "inliner-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "keywords": [
+    "inliner",
+    "mcp",
+    "model-context-protocol",
+    "ai-images",
+    "claude-code",
+    "codex",
+    "copilot",
+    "cursor",
+    "image-generation"
+  ],
+  "author": "Inliner <support@inliner.ai>",
+  "license": "MIT",
+  "homepage": "https://inliner.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/inliner-ai/mcp-server"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "form-data": "^4.0.0",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
