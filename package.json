@@ -1,6 +1,6 @@
 {
   "name": "@inliner/mcp-server",
-  "version": "1.0.23",
+  "version": "1.0.24",
   "description": "MCP server for Inliner.ai — gives AI coding agents live access to your image projects, credits, and generation",
   "main": "dist/index.js",
   "bin": {

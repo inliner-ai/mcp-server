@@ -6,6 +6,7 @@ const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const zod_1 = require("zod");
 const API_BASE = process.env.INLINER_API_URL || "https://api.inliner.ai";
 const IMG_BASE = "https://img.inliner.ai";
+const DEFAULT_PROJECT = process.env.INLINER_DEFAULT_PROJECT;
 function getApiKey() {
     const key = process.env.INLINER_API_KEY ||
         process.argv.find((a) => a.startsWith("--api-key="))?.split("=")[1];
@@ -116,6 +117,27 @@ async function generateContentWithSmartSlug(project, prompt, width, height, form
         alternativeSlugs: recommendation?.alternativeSlugs || [],
     };
 }
+async function resolveProject(project, apiKey) {
+    if (project && project.trim().length > 0)
+        return project.trim();
+    if (DEFAULT_PROJECT && DEFAULT_PROJECT.trim().length > 0)
+        return DEFAULT_PROJECT.trim();
+    try {
+        const data = await apiFetch("account/projects", apiKey);
+        const projects = data?.projects || [];
+        if (projects.length > 0) {
+            const defaultProject = projects.find((p) => p.isDefault === 1 || p.isDefault === true);
+            if (defaultProject?.project)
+                return defaultProject.project;
+            if (projects[0]?.project)
+                return projects[0].project;
+        }
+    }
+    catch {
+        // fall through
+    }
+    return "default";
+}
 // --- Server setup ---
 const server = new mcp_js_1.McpServer({
     name: "inliner",
@@ -126,6 +148,7 @@ const apiKey = getApiKey();
 server.tool("generate_image_url", "Build a properly formatted Inliner.ai image URL from a description and project namespace (uses smart URL recommendation by default)", {
     project: zod_1.z
         .string()
+        .optional()
         .describe("Project namespace from Inliner dashboard (e.g. 'my-project')"),
     description: zod_1.z
         .string()
@@ -153,12 +176,13 @@ server.tool("generate_image_url", "Build a properly formatted Inliner.ai image U
         .optional()
         .describe("Optional edit instruction to apply to an existing image (e.g. 'make-background-blue')"),
 }, async ({ project, description, width, height, format, smartUrl, edit }) => {
+    const resolvedProject = await resolveProject(project, apiKey);
     const recommendation = smartUrl
-        ? await recommendSmartSlug(project, description, width, height, format, apiKey)
+        ? await recommendSmartSlug(resolvedProject, description, width, height, format, apiKey)
         : null;
     const fallbackSlug = sanitizeSlug(description);
     const selectedSlug = recommendation?.recommendedSlug || fallbackSlug;
-    let url = recommendation?.fullUrl || `${IMG_BASE}/${project}/${selectedSlug}.${format}`;
+    let url = recommendation?.fullUrl || `${IMG_BASE}/${resolvedProject}/${selectedSlug}.${format}`;
     if (edit) {
         const sanitizedEdit = sanitizeSlug(edit);
         url += `/${sanitizedEdit}.${format}`;
@@ -172,6 +196,7 @@ server.tool("generate_image_url", "Build a properly formatted Inliner.ai image U
                     url,
                     html,
                     smartUrlUsed: smartUrl,
+                    project: resolvedProject,
                     recommendedSlug: recommendation?.recommendedSlug || selectedSlug,
                     alternativeSlugs: recommendation?.alternativeSlugs || [],
                 }, null, 2),
@@ -182,6 +207,7 @@ server.tool("generate_image_url", "Build a properly formatted Inliner.ai image U
 server.tool("generate_image", "Generate an image and optionally save it to a local file. Uses smart URL recommendation by default.", {
     project: zod_1.z
         .string()
+        .optional()
         .describe("Project namespace from Inliner dashboard (e.g. 'my-project')"),
     description: zod_1.z
         .string()
@@ -209,7 +235,8 @@ server.tool("generate_image", "Generate an image and optionally save it to a loc
         .default(true)
         .describe("Use smart URL recommendation for concise, readable slugs"),
 }, async ({ project, description, width, height, format, outputPath, smartUrl }) => {
-    const generated = await generateContentWithSmartSlug(project, description, width, height, format, apiKey, smartUrl);
+    const resolvedProject = await resolveProject(project, apiKey);
+    const generated = await generateContentWithSmartSlug(resolvedProject, description, width, height, format, apiKey, smartUrl);
     if (outputPath) {
         const fs = await import("fs/promises");
         const path = await import("path");
@@ -230,6 +257,7 @@ server.tool("generate_image", "Generate an image and optionally save it to a loc
                     outputPath: outputPath || null,
                     size: generated.imageBuffer.byteLength,
                     smartUrlUsed: smartUrl,
+                    project: resolvedProject,
                     recommendedSlug: generated.recommendedSlug || null,
                     alternativeSlugs: generated.alternativeSlugs || [],
                 }, null, 2),
@@ -274,23 +302,7 @@ server.tool("create_image", "Quick alias for generating images with sensible def
         .optional()
         .describe("Use smart URL recommendation for concise, readable slugs"),
 }, async ({ description, project, width = 800, height = 600, format = "png", outputPath, smartUrl = true }) => {
-    // If no project specified, get the first available project
-    let resolvedProject = project;
-    if (!resolvedProject) {
-        try {
-            const projectsData = await apiFetch("account/projects", apiKey);
-            if (projectsData?.projects && projectsData.projects.length > 0) {
-                resolvedProject = projectsData.projects[0].project;
-            }
-            else {
-                resolvedProject = "default";
-            }
-        }
-        catch {
-            resolvedProject = "default";
-        }
-    }
-    const finalProject = resolvedProject || "default";
+    const finalProject = await resolveProject(project, apiKey);
     const generated = await generateContentWithSmartSlug(finalProject, description, width, height, format, apiKey, smartUrl);
     // Save to file if outputPath is provided
     if (outputPath) {

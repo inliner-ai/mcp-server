@@ -48,7 +48,10 @@ Create `.cursor/mcp.json` (or `.vscode/mcp.json`) in your project root:
     "inliner": {
       "command": "npx",
       "args": ["@inliner/mcp-server"],
-      "env": { "INLINER_API_KEY": "your-key" }
+      "env": {
+        "INLINER_API_KEY": "your-key",
+        "INLINER_DEFAULT_PROJECT": "your-project-namespace"
+      }
     }
   }
 }
@@ -70,12 +73,20 @@ Add to Cursor Settings > Features > MCP, or VS Code MCP settings:
 
 **Note:** Using the `env` field is recommended over `--api-key` command-line arguments for better compatibility with MCP clients.
 
+Preferred project behavior:
+- If a tool call omits `project`, the server resolves it in this order:
+  1. `INLINER_DEFAULT_PROJECT` (if set)
+  2. account default project
+  3. first available project
+  4. `"default"` fallback
+- This reduces repetitive "which project?" confirmations in day-to-day usage.
+
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `generate_image_url` | Build a properly formatted Inliner image URL from description, dimensions, and project (smart URL slug recommendation by default) |
-| `generate_image` | Generate an image with full prompt + concise smart slug, and optionally save to a local file |
+| `generate_image_url` | Build a properly formatted Inliner image URL from description, dimensions, and project (project is optional; smart URL slug recommendation by default) |
+| `generate_image` | Generate an image with full prompt + concise smart slug, and optionally save to a local file (project is optional) |
 | `create_image` | Quick alias for generating images with sensible defaults (800x600 PNG) with smart slug recommendation |
 | `edit_image` | Edit an existing image by URL **or** upload a local image, apply edit instructions, optionally resize, and save to a local file |
 | `get_projects` | List all your Inliner projects with namespaces and settings |
