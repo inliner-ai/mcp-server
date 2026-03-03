@@ -122,6 +122,7 @@ Smart URL behavior:
 - The server recommends concise slugs using `POST /url/recommend`
 - Then generates with full prompt context using `POST /content/generate` and the selected slug
 - This preserves rich prompt quality while producing readable/SEO-friendly URL paths
+- `generate_image_url` responses include the selected slug plus alternatives to help agents pick cleaner URLs when needed
 
 > "Generate a happy duck image and save it to ./images/duck.png"
 
