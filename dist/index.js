@@ -40,6 +40,12 @@ function sanitizeSlug(text) {
         .replace(/^-|-$/g, "")
         .slice(0, 100);
 }
+function buildImageUrl(project, slug, format, fullPath) {
+    const path = fullPath && fullPath.trim().length > 0
+        ? fullPath.replace(/^\//, "")
+        : `${project}/${slug}.${format}`;
+    return `${IMG_BASE}/${path}`;
+}
 function parseDataUrlToBuffer(dataUrl) {
     if (!dataUrl || typeof dataUrl !== "string")
         return null;
@@ -141,7 +147,7 @@ async function resolveProject(project, apiKey) {
 // --- Server setup ---
 const server = new mcp_js_1.McpServer({
     name: "inliner",
-    version: "1.0.0",
+    version: "1.0.26",
 });
 const apiKey = getApiKey();
 // --- Tools ---
@@ -182,7 +188,7 @@ server.tool("generate_image_url", "Build a properly formatted Inliner.ai image U
         : null;
     const fallbackSlug = sanitizeSlug(description);
     const selectedSlug = recommendation?.recommendedSlug || fallbackSlug;
-    let url = recommendation?.fullUrl || `${IMG_BASE}/${resolvedProject}/${selectedSlug}.${format}`;
+    let url = buildImageUrl(resolvedProject, selectedSlug, format, recommendation?.fullPath);
     if (edit) {
         const sanitizedEdit = sanitizeSlug(edit);
         url += `/${sanitizedEdit}.${format}`;

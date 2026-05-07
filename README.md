@@ -8,11 +8,11 @@ Works with any [Model Context Protocol](https://modelcontextprotocol.io) compati
 
 ### Claude Code
 ```bash
-claude mcp add --transport stdio inliner -- npx @inliner/mcp-server --api-key=YOUR_API_KEY
+claude mcp add --transport stdio inliner -- npx -y @inliner/mcp-server --api-key=YOUR_API_KEY
 
 # Or with environment variable
 export INLINER_API_KEY=your-key
-claude mcp add --transport stdio inliner -- npx @inliner/mcp-server
+claude mcp add --transport stdio inliner -- npx -y @inliner/mcp-server
 ```
 
 ### OpenAI Codex CLI
@@ -20,7 +20,7 @@ Add to `~/.codex/config.toml`:
 ```toml
 [mcp.inliner]
 command = "npx"
-args = ["@inliner/mcp-server"]
+args = ["-y", "@inliner/mcp-server"]
 env = { INLINER_API_KEY = "your-key" }
 ```
 
@@ -31,7 +31,7 @@ Add to `~/.gemini/settings.json`:
   "mcpServers": {
     "inliner": {
       "command": "npx",
-      "args": ["@inliner/mcp-server"],
+      "args": ["-y", "@inliner/mcp-server"],
       "env": { "INLINER_API_KEY": "your-key" }
     }
   }
@@ -47,7 +47,7 @@ Create `.cursor/mcp.json` (or `.vscode/mcp.json`) in your project root:
   "mcpServers": {
     "inliner": {
       "command": "npx",
-      "args": ["@inliner/mcp-server"],
+      "args": ["-y", "@inliner/mcp-server"],
       "env": {
         "INLINER_API_KEY": "your-key",
         "INLINER_DEFAULT_PROJECT": "your-project-namespace"
@@ -64,7 +64,7 @@ Add to Cursor Settings > Features > MCP, or VS Code MCP settings:
   "mcpServers": {
     "inliner": {
       "command": "npx",
-      "args": ["@inliner/mcp-server"],
+      "args": ["-y", "@inliner/mcp-server"],
       "env": { "INLINER_API_KEY": "your-key" }
     }
   }

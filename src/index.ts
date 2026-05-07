@@ -47,6 +47,13 @@ function sanitizeSlug(text: string): string {
     .slice(0, 100);
 }
 
+function buildImageUrl(project: string, slug: string, format: string, fullPath?: string): string {
+  const path = fullPath && fullPath.trim().length > 0
+    ? fullPath.replace(/^\//, "")
+    : `${project}/${slug}.${format}`;
+  return `${IMG_BASE}/${path}`;
+}
+
 function parseDataUrlToBuffer(dataUrl?: string): Buffer | null {
   if (!dataUrl || typeof dataUrl !== "string") return null;
   if (!dataUrl.startsWith("data:")) return null;
@@ -181,7 +188,7 @@ async function resolveProject(project: string | undefined, apiKey: string): Prom
 
 const server = new McpServer({
   name: "inliner",
-  version: "1.0.0",
+  version: "1.0.26",
 });
 
 const apiKey = getApiKey();
@@ -235,7 +242,7 @@ server.tool(
     const fallbackSlug = sanitizeSlug(description);
     const selectedSlug = recommendation?.recommendedSlug || fallbackSlug;
 
-    let url = recommendation?.fullUrl || `${IMG_BASE}/${resolvedProject}/${selectedSlug}.${format}`;
+    let url = buildImageUrl(resolvedProject, selectedSlug, format, recommendation?.fullPath);
     if (edit) {
       const sanitizedEdit = sanitizeSlug(edit);
       url += `/${sanitizedEdit}.${format}`;
