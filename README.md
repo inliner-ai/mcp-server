@@ -16,12 +16,34 @@ claude mcp add --transport stdio inliner -- npx -y @inliner/mcp-server
 ```
 
 ### OpenAI Codex CLI
-Add to `~/.codex/config.toml`:
+Use Codex's MCP command:
+```bash
+codex mcp add inliner --env INLINER_API_KEY=your-key -- npx -y @inliner/mcp-server
+```
+
+Then verify the server is configured:
+```bash
+codex mcp list
+```
+
+Or add it manually to `~/.codex/config.toml`:
 ```toml
-[mcp.inliner]
+[mcp_servers.inliner]
 command = "npx"
 args = ["-y", "@inliner/mcp-server"]
-env = { INLINER_API_KEY = "your-key" }
+
+[mcp_servers.inliner.env]
+INLINER_API_KEY = "your-key"
+INLINER_DEFAULT_PROJECT = "your-project-namespace"
+```
+
+If you prefer to keep secrets in your shell environment, export them first and
+forward them from Codex:
+```toml
+[mcp_servers.inliner]
+command = "npx"
+args = ["-y", "@inliner/mcp-server"]
+env_vars = ["INLINER_API_KEY", "INLINER_DEFAULT_PROJECT"]
 ```
 
 ### Gemini CLI
