@@ -190,14 +190,19 @@ const MCP_INSTRUCTIONS = `Use Inliner when the user requests a new or edited vis
 
 const server = new McpServer({
   name: "inliner",
-  version: "1.1.0",
+  version: "1.1.1",
 }, {
   instructions: MCP_INSTRUCTIONS,
 });
 
 const apiKey = getApiKey();
 
-function toolResult(payload: Record<string, unknown>) {
+function toolResult(payload: unknown) {
+  const structuredContent =
+    payload !== null && typeof payload === "object" && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : { data: payload };
+
   return {
     content: [
       {
@@ -205,7 +210,7 @@ function toolResult(payload: Record<string, unknown>) {
         text: JSON.stringify(payload, null, 2),
       },
     ],
-    structuredContent: payload,
+    structuredContent,
   };
 }
 

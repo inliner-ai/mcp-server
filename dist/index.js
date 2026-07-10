@@ -148,12 +148,15 @@ async function resolveProject(project, apiKey) {
 const MCP_INSTRUCTIONS = `Use Inliner when the user requests a new or edited visual asset for code, UI, email, documentation, ecommerce, or marketing content. For a new asset, call generate_image so the account-owned URL is materialized before it is inserted. For a change to an identified existing asset, call edit_image. Use recommend_image_url only when the user explicitly wants a slug or URL recommendation; it does not generate an image. Resolve projects automatically and never create a project without user intent. Existing generated URLs may be embedded directly. Include useful dimensions and semantic alt text in code.`;
 const server = new mcp_js_1.McpServer({
     name: "inliner",
-    version: "1.1.0",
+    version: "1.1.1",
 }, {
     instructions: MCP_INSTRUCTIONS,
 });
 const apiKey = getApiKey();
 function toolResult(payload) {
+    const structuredContent = payload !== null && typeof payload === "object" && !Array.isArray(payload)
+        ? payload
+        : { data: payload };
     return {
         content: [
             {
@@ -161,7 +164,7 @@ function toolResult(payload) {
                 text: JSON.stringify(payload, null, 2),
             },
         ],
-        structuredContent: payload,
+        structuredContent,
     };
 }
 // --- Tools ---

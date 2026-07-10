@@ -4,7 +4,7 @@ MCP server for [Inliner.ai](https://inliner.ai) — gives AI coding agents live 
 
 Works with any [Model Context Protocol](https://modelcontextprotocol.io) compatible tool: Claude Code, OpenAI Codex CLI, GitHub Copilot, Gemini CLI, Cursor, Windsurf, and more.
 
-Current release: `@inliner/mcp-server@1.1.0`, with 12 tools and model-facing initialization instructions for safe tool selection.
+Current release: `@inliner/mcp-server@1.1.1`, with 12 tools, model-facing initialization instructions, and MCP-safe structured results for array-valued API responses.
 
 For automatic activation guidance as well as tools, install the canonical [`inliner-ai` agent skill/plugin](https://github.com/inliner-ai/agent-skill). Codex users can install both layers together:
 
