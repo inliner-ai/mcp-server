@@ -186,94 +186,126 @@ async function resolveProject(project: string | undefined, apiKey: string): Prom
 
 // --- Server setup ---
 
+const MCP_INSTRUCTIONS = `Use Inliner when the user requests a new or edited visual asset for code, UI, email, documentation, ecommerce, or marketing content. For a new asset, call generate_image so the account-owned URL is materialized before it is inserted. For a change to an identified existing asset, call edit_image. Use recommend_image_url only when the user explicitly wants a slug or URL recommendation; it does not generate an image. Resolve projects automatically and never create a project without user intent. Existing generated URLs may be embedded directly. Include useful dimensions and semantic alt text in code.`;
+
 const server = new McpServer({
   name: "inliner",
-  version: "1.0.26",
+  version: "1.1.0",
+}, {
+  instructions: MCP_INSTRUCTIONS,
 });
 
 const apiKey = getApiKey();
 
+function toolResult(payload: Record<string, unknown>) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify(payload, null, 2),
+      },
+    ],
+    structuredContent: payload,
+  };
+}
+
 // --- Tools ---
+
+const imageUrlInput = {
+  project: z
+    .string()
+    .optional()
+    .describe("Project namespace. Omit to use the configured or account default."),
+  description: z
+    .string()
+    .describe("Detailed visual description used to recommend a concise URL slug."),
+  width: z
+    .number()
+    .min(100)
+    .max(4096)
+    .describe("Recommended image width in pixels (100-4096)."),
+  height: z
+    .number()
+    .min(100)
+    .max(4096)
+    .describe("Recommended image height in pixels (100-4096)."),
+  format: z
+    .enum(["png", "jpg"])
+    .default("png")
+    .describe("Recommended format: png for graphics/transparency or jpg for photos."),
+  smartUrl: z
+    .boolean()
+    .default(true)
+    .describe("Use Inliner's concise smart-slug recommendation."),
+};
+
+async function recommendImageUrl({
+  project,
+  description,
+  width,
+  height,
+  format,
+  smartUrl,
+  edit,
+}: {
+  project?: string;
+  description: string;
+  width: number;
+  height: number;
+  format: "png" | "jpg";
+  smartUrl: boolean;
+  edit?: string;
+}) {
+  const resolvedProject = await resolveProject(project, apiKey);
+
+  const recommendation = smartUrl
+    ? await recommendSmartSlug(resolvedProject, description, width, height, format, apiKey)
+    : null;
+  const fallbackSlug = sanitizeSlug(description);
+  const selectedSlug = recommendation?.recommendedSlug || fallbackSlug;
+
+  let url = buildImageUrl(resolvedProject, selectedSlug, format, recommendation?.fullPath);
+  if (edit) {
+    const sanitizedEdit = sanitizeSlug(edit);
+    url += `/${sanitizedEdit}.${format}`;
+  }
+  const html = `<img src="${url}" alt="${description.replace(/-/g, " ")}" width="${width}" height="${height}" loading="lazy" />`;
+
+  return toolResult({
+    url,
+    html,
+    generated: false,
+    warning: "This tool recommends a URL only. Call generate_image before inserting a new account-owned asset.",
+    smartUrlUsed: smartUrl,
+    project: resolvedProject,
+    recommendedSlug: recommendation?.recommendedSlug || selectedSlug,
+    alternativeSlugs: recommendation?.alternativeSlugs || [],
+  });
+}
+
+server.tool(
+  "recommend_image_url",
+  "Recommend a concise Inliner URL and HTML snippet without generating an image. Use only when the user explicitly wants naming or URL planning; use generate_image for a new asset that will be inserted or shipped.",
+  imageUrlInput,
+  recommendImageUrl
+);
 
 server.tool(
   "generate_image_url",
-  "Build a properly formatted Inliner.ai image URL from a description and project namespace (uses smart URL recommendation by default)",
+  "Deprecated compatibility alias for recommend_image_url. It recommends a URL but does not generate the image. Prefer generate_image for new assets and edit_image for changes to existing assets.",
   {
-    project: z
-      .string()
-      .optional()
-      .describe("Project namespace from Inliner dashboard (e.g. 'my-project')"),
-    description: z
-      .string()
-      .describe(
-        "Hyphenated image description (e.g. 'modern-office-team-meeting')"
-      ),
-    width: z
-      .number()
-      .min(100)
-      .max(4096)
-      .describe("Image width in pixels (100-4096)"),
-    height: z
-      .number()
-      .min(100)
-      .max(4096)
-      .describe("Image height in pixels (100-4096)"),
-    format: z
-      .enum(["png", "jpg"])
-      .default("png")
-      .describe("Image format: png (transparency) or jpg (photos)"),
-    smartUrl: z
-      .boolean()
-      .default(true)
-      .describe("Use smart URL recommendation for concise, SEO-friendly slugs"),
+    ...imageUrlInput,
     edit: z
       .string()
       .optional()
-      .describe(
-        "Optional edit instruction to apply to an existing image (e.g. 'make-background-blue')"
-      ),
+      .describe("Deprecated URL-only edit suffix. Prefer edit_image with an explicit source."),
   },
-  async ({ project, description, width, height, format, smartUrl, edit }) => {
-    const resolvedProject = await resolveProject(project, apiKey);
-
-    const recommendation = smartUrl
-      ? await recommendSmartSlug(resolvedProject, description, width, height, format, apiKey)
-      : null;
-    const fallbackSlug = sanitizeSlug(description);
-    const selectedSlug = recommendation?.recommendedSlug || fallbackSlug;
-
-    let url = buildImageUrl(resolvedProject, selectedSlug, format, recommendation?.fullPath);
-    if (edit) {
-      const sanitizedEdit = sanitizeSlug(edit);
-      url += `/${sanitizedEdit}.${format}`;
-    }
-    const html = `<img src="${url}" alt="${description.replace(/-/g, " ")}" width="${width}" height="${height}" loading="lazy" />`;
-
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(
-            {
-              url,
-              html,
-              smartUrlUsed: smartUrl,
-              project: resolvedProject,
-              recommendedSlug: recommendation?.recommendedSlug || selectedSlug,
-              alternativeSlugs: recommendation?.alternativeSlugs || [],
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
-  }
+  recommendImageUrl
 );
 
 server.tool(
   "generate_image",
-  "Generate an image and optionally save it to a local file. Uses smart URL recommendation by default.",
+  "Generate and host a new Inliner image, returning a materialized CDN URL and optional local file. Use for every new asset that will be inserted, shipped, or verified. This operation consumes generation credits.",
   {
     project: z
       .string()
@@ -331,34 +363,24 @@ server.tool(
       await fs.writeFile(outputPath, generated.imageBuffer);
     }
 
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(
-            {
-              url: generated.url,
-              html: generated.html,
-              saved: outputPath ? true : false,
-              outputPath: outputPath || null,
-              size: generated.imageBuffer.byteLength,
-              smartUrlUsed: smartUrl,
-              project: resolvedProject,
-              recommendedSlug: generated.recommendedSlug || null,
-              alternativeSlugs: generated.alternativeSlugs || [],
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
+    return toolResult({
+      url: generated.url,
+      html: generated.html,
+      generated: true,
+      saved: Boolean(outputPath),
+      outputPath: outputPath || null,
+      size: generated.imageBuffer.byteLength,
+      smartUrlUsed: smartUrl,
+      project: resolvedProject,
+      recommendedSlug: generated.recommendedSlug || null,
+      alternativeSlugs: generated.alternativeSlugs || [],
+    });
   }
 );
 
 server.tool(
   "create_image",
-  "Quick alias for generating images with sensible defaults. Uses smart URL recommendation by default.",
+  "Deprecated compatibility alias for generate_image with 800x600 PNG defaults. Prefer generate_image so dimensions and format reflect the actual layout. This operation consumes generation credits.",
   {
     description: z
       .string()
@@ -422,34 +444,25 @@ server.tool(
       await fs.writeFile(outputPath, generated.imageBuffer);
     }
 
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(
-            {
-              url: generated.url,
-              html: generated.html,
-              saved: outputPath ? true : false,
-              outputPath: outputPath || null,
-              size: generated.imageBuffer.byteLength,
-              project: finalProject,
-              smartUrlUsed: smartUrl,
-              recommendedSlug: generated.recommendedSlug || null,
-              alternativeSlugs: generated.alternativeSlugs || [],
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
+    return toolResult({
+      url: generated.url,
+      html: generated.html,
+      generated: true,
+      deprecatedAlias: "create_image",
+      saved: Boolean(outputPath),
+      outputPath: outputPath || null,
+      size: generated.imageBuffer.byteLength,
+      project: finalProject,
+      smartUrlUsed: smartUrl,
+      recommendedSlug: generated.recommendedSlug || null,
+      alternativeSlugs: generated.alternativeSlugs || [],
+    });
   }
 );
 
 server.tool(
   "edit_image",
-  "Edit an existing image by URL, apply edit instructions, optionally resize, and save to a local file. Polls until edit is complete (up to 3 minutes).",
+  "Edit an explicitly identified existing image by Inliner URL or local path, optionally resize it, and return a materialized CDN URL or local file. Use for change, resize, restyle, or remove-background requests when a source image exists. This operation consumes edit credits.",
   {
     sourceUrl: z
       .string()
@@ -769,26 +782,16 @@ server.tool(
 
     const html = `<img src="${url}" alt="${editInstruction.replace(/-/g, " ")}" width="${outputWidth}" height="${outputHeight}" loading="lazy" />`;
 
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(
-            {
-              url,
-              html,
-              saved: outputPath ? true : false,
-              outputPath: outputPath || null,
-              size: imageBuffer.byteLength,
-              editInstruction,
-              dimensions: `${outputWidth}x${outputHeight}`,
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
+    return toolResult({
+      url,
+      html,
+      edited: true,
+      saved: Boolean(outputPath),
+      outputPath: outputPath || null,
+      size: imageBuffer.byteLength,
+      editInstruction,
+      dimensions: `${outputWidth}x${outputHeight}`,
+    });
   }
 );
 
@@ -799,14 +802,7 @@ server.tool(
   async () => {
     try {
       const data = await apiFetch("account/projects", apiKey);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(data, null, 2),
-          },
-        ],
-      };
+      return toolResult(data);
     } catch (err: any) {
       return {
         content: [
@@ -823,7 +819,7 @@ server.tool(
 
 server.tool(
   "create_project",
-  "Create a new project (reserves the namespace for your account). Use this to create a project namespace like 'my-project' that you can then use for generating images.",
+  "Create and reserve a new project namespace. Call only when the user explicitly asks to create a project or approves creation after project resolution fails; do not create one as an implicit generation step.",
   {
     project: z
       .string()
@@ -873,18 +869,11 @@ server.tool(
         throw new Error(errorMsg);
       }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              success: true,
-              project: data.project,
-              message: `Project '${project}' created successfully. Use this namespace with --project ${project} or in image URLs.`,
-            }, null, 2),
-          },
-        ],
-      };
+      return toolResult({
+        success: true,
+        project: data.project,
+        message: `Project '${project}' created successfully. Use this namespace with --project ${project} or in image URLs.`,
+      });
     } catch (err: any) {
       return {
         content: [
@@ -908,14 +897,7 @@ server.tool(
   async ({ projectId }) => {
     try {
       const data = await apiFetch(`account/projects/${projectId}`, apiKey);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(data, null, 2),
-          },
-        ],
-      };
+      return toolResult(data);
     } catch (err: any) {
       return {
         content: [
@@ -937,14 +919,7 @@ server.tool(
   async () => {
     try {
       const data = await apiFetch("account/plan-usage", apiKey);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(data, null, 2),
-          },
-        ],
-      };
+      return toolResult(data);
     } catch (err: any) {
       return {
         content: [
@@ -966,14 +941,7 @@ server.tool(
   async () => {
     try {
       const data = await apiFetch("account/current-plan", apiKey);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(data, null, 2),
-          },
-        ],
-      };
+      return toolResult(data);
     } catch (err: any) {
       return {
         content: [
@@ -1010,14 +978,7 @@ server.tool(
         path += `&projectId=${projectId}`;
       }
       const data = await apiFetch(path, apiKey);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(data, null, 2),
-          },
-        ],
-      };
+      return toolResult(data);
     } catch (err: any) {
       return {
         content: [
@@ -1089,25 +1050,14 @@ server.tool(
       ],
     };
 
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(
-            {
-              useCase,
-              recommended: dimensions[useCase],
-              format_hint:
-                useCase === "logo"
-                  ? "Use .png for transparency support"
-                  : "Use .jpg for photos, .png for graphics/transparency",
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
+    return toolResult({
+      useCase,
+      recommended: dimensions[useCase],
+      format_hint:
+        useCase === "logo"
+          ? "Use .png for transparency support"
+          : "Use .jpg for photos, .png for graphics/transparency",
+    });
   }
 );
 
@@ -1123,11 +1073,18 @@ server.resource(
         mimeType: "text/markdown",
         text: `# Inliner.ai Quick Reference
 
+## Tool Selection
+- New asset to insert or ship: call \`generate_image\` so the CDN URL is materialized.
+- Change an identified existing asset: call \`edit_image\` with \`sourceUrl\` or \`sourcePath\`.
+- URL or slug planning only: call \`recommend_image_url\`; it does not generate an image.
+- Existing generated asset: reuse its CDN URL directly.
+- Never call \`create_project\` without user intent.
+
 ## URL Format
 \`https://img.inliner.ai/{project}/{description}_{WxH}.{png|jpg}\`
 
 ## Image Editing
-Append edit instructions: \`/{original-url}/{edit-instruction}.png\`
+Use \`edit_image\` with an explicit source rather than constructing edit URLs manually.
 
 ## Common Dimensions
 - Hero: 1920x1080, 1200x600
@@ -1145,6 +1102,7 @@ Include in description: flat-illustration, 3d-render, watercolor, pixel-art, min
 - Keep under 100 characters
 - Use .png for transparency, .jpg for photos
 - Always include alt text and dimensions in HTML
+- Account-owned URLs must be generated before insertion; a recommendation alone is not a completed asset.
 `,
       },
     ],

@@ -145,43 +145,54 @@ async function resolveProject(project, apiKey) {
     return "default";
 }
 // --- Server setup ---
+const MCP_INSTRUCTIONS = `Use Inliner when the user requests a new or edited visual asset for code, UI, email, documentation, ecommerce, or marketing content. For a new asset, call generate_image so the account-owned URL is materialized before it is inserted. For a change to an identified existing asset, call edit_image. Use recommend_image_url only when the user explicitly wants a slug or URL recommendation; it does not generate an image. Resolve projects automatically and never create a project without user intent. Existing generated URLs may be embedded directly. Include useful dimensions and semantic alt text in code.`;
 const server = new mcp_js_1.McpServer({
     name: "inliner",
-    version: "1.0.26",
+    version: "1.1.0",
+}, {
+    instructions: MCP_INSTRUCTIONS,
 });
 const apiKey = getApiKey();
+function toolResult(payload) {
+    return {
+        content: [
+            {
+                type: "text",
+                text: JSON.stringify(payload, null, 2),
+            },
+        ],
+        structuredContent: payload,
+    };
+}
 // --- Tools ---
-server.tool("generate_image_url", "Build a properly formatted Inliner.ai image URL from a description and project namespace (uses smart URL recommendation by default)", {
+const imageUrlInput = {
     project: zod_1.z
         .string()
         .optional()
-        .describe("Project namespace from Inliner dashboard (e.g. 'my-project')"),
+        .describe("Project namespace. Omit to use the configured or account default."),
     description: zod_1.z
         .string()
-        .describe("Hyphenated image description (e.g. 'modern-office-team-meeting')"),
+        .describe("Detailed visual description used to recommend a concise URL slug."),
     width: zod_1.z
         .number()
         .min(100)
         .max(4096)
-        .describe("Image width in pixels (100-4096)"),
+        .describe("Recommended image width in pixels (100-4096)."),
     height: zod_1.z
         .number()
         .min(100)
         .max(4096)
-        .describe("Image height in pixels (100-4096)"),
+        .describe("Recommended image height in pixels (100-4096)."),
     format: zod_1.z
         .enum(["png", "jpg"])
         .default("png")
-        .describe("Image format: png (transparency) or jpg (photos)"),
+        .describe("Recommended format: png for graphics/transparency or jpg for photos."),
     smartUrl: zod_1.z
         .boolean()
         .default(true)
-        .describe("Use smart URL recommendation for concise, SEO-friendly slugs"),
-    edit: zod_1.z
-        .string()
-        .optional()
-        .describe("Optional edit instruction to apply to an existing image (e.g. 'make-background-blue')"),
-}, async ({ project, description, width, height, format, smartUrl, edit }) => {
+        .describe("Use Inliner's concise smart-slug recommendation."),
+};
+async function recommendImageUrl({ project, description, width, height, format, smartUrl, edit, }) {
     const resolvedProject = await resolveProject(project, apiKey);
     const recommendation = smartUrl
         ? await recommendSmartSlug(resolvedProject, description, width, height, format, apiKey)
@@ -194,23 +205,26 @@ server.tool("generate_image_url", "Build a properly formatted Inliner.ai image U
         url += `/${sanitizedEdit}.${format}`;
     }
     const html = `<img src="${url}" alt="${description.replace(/-/g, " ")}" width="${width}" height="${height}" loading="lazy" />`;
-    return {
-        content: [
-            {
-                type: "text",
-                text: JSON.stringify({
-                    url,
-                    html,
-                    smartUrlUsed: smartUrl,
-                    project: resolvedProject,
-                    recommendedSlug: recommendation?.recommendedSlug || selectedSlug,
-                    alternativeSlugs: recommendation?.alternativeSlugs || [],
-                }, null, 2),
-            },
-        ],
-    };
-});
-server.tool("generate_image", "Generate an image and optionally save it to a local file. Uses smart URL recommendation by default.", {
+    return toolResult({
+        url,
+        html,
+        generated: false,
+        warning: "This tool recommends a URL only. Call generate_image before inserting a new account-owned asset.",
+        smartUrlUsed: smartUrl,
+        project: resolvedProject,
+        recommendedSlug: recommendation?.recommendedSlug || selectedSlug,
+        alternativeSlugs: recommendation?.alternativeSlugs || [],
+    });
+}
+server.tool("recommend_image_url", "Recommend a concise Inliner URL and HTML snippet without generating an image. Use only when the user explicitly wants naming or URL planning; use generate_image for a new asset that will be inserted or shipped.", imageUrlInput, recommendImageUrl);
+server.tool("generate_image_url", "Deprecated compatibility alias for recommend_image_url. It recommends a URL but does not generate the image. Prefer generate_image for new assets and edit_image for changes to existing assets.", {
+    ...imageUrlInput,
+    edit: zod_1.z
+        .string()
+        .optional()
+        .describe("Deprecated URL-only edit suffix. Prefer edit_image with an explicit source."),
+}, recommendImageUrl);
+server.tool("generate_image", "Generate and host a new Inliner image, returning a materialized CDN URL and optional local file. Use for every new asset that will be inserted, shipped, or verified. This operation consumes generation credits.", {
     project: zod_1.z
         .string()
         .optional()
@@ -252,26 +266,20 @@ server.tool("generate_image", "Generate an image and optionally save it to a loc
         // Write file
         await fs.writeFile(outputPath, generated.imageBuffer);
     }
-    return {
-        content: [
-            {
-                type: "text",
-                text: JSON.stringify({
-                    url: generated.url,
-                    html: generated.html,
-                    saved: outputPath ? true : false,
-                    outputPath: outputPath || null,
-                    size: generated.imageBuffer.byteLength,
-                    smartUrlUsed: smartUrl,
-                    project: resolvedProject,
-                    recommendedSlug: generated.recommendedSlug || null,
-                    alternativeSlugs: generated.alternativeSlugs || [],
-                }, null, 2),
-            },
-        ],
-    };
+    return toolResult({
+        url: generated.url,
+        html: generated.html,
+        generated: true,
+        saved: Boolean(outputPath),
+        outputPath: outputPath || null,
+        size: generated.imageBuffer.byteLength,
+        smartUrlUsed: smartUrl,
+        project: resolvedProject,
+        recommendedSlug: generated.recommendedSlug || null,
+        alternativeSlugs: generated.alternativeSlugs || [],
+    });
 });
-server.tool("create_image", "Quick alias for generating images with sensible defaults. Uses smart URL recommendation by default.", {
+server.tool("create_image", "Deprecated compatibility alias for generate_image with 800x600 PNG defaults. Prefer generate_image so dimensions and format reflect the actual layout. This operation consumes generation credits.", {
     description: zod_1.z
         .string()
         .describe("Image description (e.g., 'happy-duck', 'modern-office-hero')"),
@@ -320,26 +328,21 @@ server.tool("create_image", "Quick alias for generating images with sensible def
         // Write file
         await fs.writeFile(outputPath, generated.imageBuffer);
     }
-    return {
-        content: [
-            {
-                type: "text",
-                text: JSON.stringify({
-                    url: generated.url,
-                    html: generated.html,
-                    saved: outputPath ? true : false,
-                    outputPath: outputPath || null,
-                    size: generated.imageBuffer.byteLength,
-                    project: finalProject,
-                    smartUrlUsed: smartUrl,
-                    recommendedSlug: generated.recommendedSlug || null,
-                    alternativeSlugs: generated.alternativeSlugs || [],
-                }, null, 2),
-            },
-        ],
-    };
+    return toolResult({
+        url: generated.url,
+        html: generated.html,
+        generated: true,
+        deprecatedAlias: "create_image",
+        saved: Boolean(outputPath),
+        outputPath: outputPath || null,
+        size: generated.imageBuffer.byteLength,
+        project: finalProject,
+        smartUrlUsed: smartUrl,
+        recommendedSlug: generated.recommendedSlug || null,
+        alternativeSlugs: generated.alternativeSlugs || [],
+    });
 });
-server.tool("edit_image", "Edit an existing image by URL, apply edit instructions, optionally resize, and save to a local file. Polls until edit is complete (up to 3 minutes).", {
+server.tool("edit_image", "Edit an explicitly identified existing image by Inliner URL or local path, optionally resize it, and return a materialized CDN URL or local file. Use for change, resize, restyle, or remove-background requests when a source image exists. This operation consumes edit credits.", {
     sourceUrl: zod_1.z
         .string()
         .optional()
@@ -616,34 +619,21 @@ server.tool("edit_image", "Edit an existing image by URL, apply edit instruction
         await fs.writeFile(outputPath, imageBuffer);
     }
     const html = `<img src="${url}" alt="${editInstruction.replace(/-/g, " ")}" width="${outputWidth}" height="${outputHeight}" loading="lazy" />`;
-    return {
-        content: [
-            {
-                type: "text",
-                text: JSON.stringify({
-                    url,
-                    html,
-                    saved: outputPath ? true : false,
-                    outputPath: outputPath || null,
-                    size: imageBuffer.byteLength,
-                    editInstruction,
-                    dimensions: `${outputWidth}x${outputHeight}`,
-                }, null, 2),
-            },
-        ],
-    };
+    return toolResult({
+        url,
+        html,
+        edited: true,
+        saved: Boolean(outputPath),
+        outputPath: outputPath || null,
+        size: imageBuffer.byteLength,
+        editInstruction,
+        dimensions: `${outputWidth}x${outputHeight}`,
+    });
 });
 server.tool("get_projects", "List all Inliner projects for the authenticated account, including namespaces and settings", {}, async () => {
     try {
         const data = await apiFetch("account/projects", apiKey);
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: JSON.stringify(data, null, 2),
-                },
-            ],
-        };
+        return toolResult(data);
     }
     catch (err) {
         return {
@@ -657,7 +647,7 @@ server.tool("get_projects", "List all Inliner projects for the authenticated acc
         };
     }
 });
-server.tool("create_project", "Create a new project (reserves the namespace for your account). Use this to create a project namespace like 'my-project' that you can then use for generating images.", {
+server.tool("create_project", "Create and reserve a new project namespace. Call only when the user explicitly asks to create a project or approves creation after project resolution fails; do not create one as an implicit generation step.", {
     project: zod_1.z
         .string()
         .regex(/^[a-z0-9_-]+$/, "Project namespace must contain only lowercase letters, numbers, hyphens, and underscores")
@@ -702,18 +692,11 @@ server.tool("create_project", "Create a new project (reserves the namespace for 
             const errorMsg = data.message || `HTTP ${res.status}`;
             throw new Error(errorMsg);
         }
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: JSON.stringify({
-                        success: true,
-                        project: data.project,
-                        message: `Project '${project}' created successfully. Use this namespace with --project ${project} or in image URLs.`,
-                    }, null, 2),
-                },
-            ],
-        };
+        return toolResult({
+            success: true,
+            project: data.project,
+            message: `Project '${project}' created successfully. Use this namespace with --project ${project} or in image URLs.`,
+        });
     }
     catch (err) {
         return {
@@ -732,14 +715,7 @@ server.tool("get_project_details", "Get detailed configuration for a specific pr
 }, async ({ projectId }) => {
     try {
         const data = await apiFetch(`account/projects/${projectId}`, apiKey);
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: JSON.stringify(data, null, 2),
-                },
-            ],
-        };
+        return toolResult(data);
     }
     catch (err) {
         return {
@@ -756,14 +732,7 @@ server.tool("get_project_details", "Get detailed configuration for a specific pr
 server.tool("get_usage", "Check remaining credits by type (base images, premium images, edits, infill, enhancement) for the current billing period", {}, async () => {
     try {
         const data = await apiFetch("account/plan-usage", apiKey);
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: JSON.stringify(data, null, 2),
-                },
-            ],
-        };
+        return toolResult(data);
     }
     catch (err) {
         return {
@@ -780,14 +749,7 @@ server.tool("get_usage", "Check remaining credits by type (base images, premium 
 server.tool("get_current_plan", "Get the current subscription plan and its feature allocations", {}, async () => {
     try {
         const data = await apiFetch("account/current-plan", apiKey);
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: JSON.stringify(data, null, 2),
-                },
-            ],
-        };
+        return toolResult(data);
     }
     catch (err) {
         return {
@@ -819,14 +781,7 @@ server.tool("list_images", "List generated images in a project, with optional fi
             path += `&projectId=${projectId}`;
         }
         const data = await apiFetch(path, apiKey);
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: JSON.stringify(data, null, 2),
-                },
-            ],
-        };
+        return toolResult(data);
     }
     catch (err) {
         return {
@@ -892,20 +847,13 @@ server.tool("get_image_dimensions", "Get recommended image dimensions for common
             { width: 1200, height: 300, notes: "Standard banner" },
         ],
     };
-    return {
-        content: [
-            {
-                type: "text",
-                text: JSON.stringify({
-                    useCase,
-                    recommended: dimensions[useCase],
-                    format_hint: useCase === "logo"
-                        ? "Use .png for transparency support"
-                        : "Use .jpg for photos, .png for graphics/transparency",
-                }, null, 2),
-            },
-        ],
-    };
+    return toolResult({
+        useCase,
+        recommended: dimensions[useCase],
+        format_hint: useCase === "logo"
+            ? "Use .png for transparency support"
+            : "Use .jpg for photos, .png for graphics/transparency",
+    });
 });
 // --- Resources ---
 server.resource("inliner-guide", "inliner://guide", async (uri) => ({
@@ -915,11 +863,18 @@ server.resource("inliner-guide", "inliner://guide", async (uri) => ({
             mimeType: "text/markdown",
             text: `# Inliner.ai Quick Reference
 
+## Tool Selection
+- New asset to insert or ship: call \`generate_image\` so the CDN URL is materialized.
+- Change an identified existing asset: call \`edit_image\` with \`sourceUrl\` or \`sourcePath\`.
+- URL or slug planning only: call \`recommend_image_url\`; it does not generate an image.
+- Existing generated asset: reuse its CDN URL directly.
+- Never call \`create_project\` without user intent.
+
 ## URL Format
 \`https://img.inliner.ai/{project}/{description}_{WxH}.{png|jpg}\`
 
 ## Image Editing
-Append edit instructions: \`/{original-url}/{edit-instruction}.png\`
+Use \`edit_image\` with an explicit source rather than constructing edit URLs manually.
 
 ## Common Dimensions
 - Hero: 1920x1080, 1200x600
@@ -937,6 +892,7 @@ Include in description: flat-illustration, 3d-render, watercolor, pixel-art, min
 - Keep under 100 characters
 - Use .png for transparency, .jpg for photos
 - Always include alt text and dimensions in HTML
+- Account-owned URLs must be generated before insertion; a recommendation alone is not a completed asset.
 `,
         },
     ],

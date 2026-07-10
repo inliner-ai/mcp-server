@@ -103,14 +103,27 @@ Preferred project behavior:
   4. `"default"` fallback
 - This reduces repetitive "which project?" confirmations in day-to-day usage.
 
+## Agent behavior
+
+The server publishes initialization instructions that tell compatible agents how to select tools:
+
+- Use `generate_image` for a new asset that will be inserted, shipped, or verified. It generates the image before returning the account-owned CDN URL.
+- Use `edit_image` when an existing source image is identified.
+- Use `recommend_image_url` only for URL naming or planning. It does not generate an image.
+- Reuse existing generated URLs directly.
+- Never create a project unless the user requests or approves it.
+
+Generation and editing consume the corresponding account credits. Read-only discovery and URL recommendation do not generate an asset.
+
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `generate_image_url` | Build a properly formatted Inliner image URL from description, dimensions, and project (project is optional; smart URL slug recommendation by default) |
-| `generate_image` | Generate an image with full prompt + concise smart slug, and optionally save to a local file (project is optional) |
-| `create_image` | Quick alias for generating images with sensible defaults (800x600 PNG) with smart slug recommendation |
+| `generate_image` | Generate and host a new image with full prompt context and a concise smart slug; optionally save it locally |
 | `edit_image` | Edit an existing image by URL **or** upload a local image, apply edit instructions, optionally resize, and save to a local file |
+| `recommend_image_url` | Recommend a concise URL and HTML snippet without generating an image |
+| `generate_image_url` | Deprecated compatibility alias for `recommend_image_url` |
+| `create_image` | Deprecated compatibility alias for `generate_image` with 800x600 PNG defaults |
 | `get_projects` | List all your Inliner projects with namespaces and settings |
 | `create_project` | Create a new project (reserves namespace like 'my-project' for your account) |
 | `get_project_details` | Get detailed project config: namespace, custom prompt, reference images |
@@ -137,14 +150,14 @@ The agent will use `create_project` to reserve the namespace, then you can use i
 
 The agent will:
 1. Call `get_project_details` to get your project config
-2. Call `generate_image_url` with the right namespace and dimensions
+2. Call `generate_image` with the right namespace and dimensions
 3. Output the `<img>` tag with the correct URL, alt text, and loading attributes
 
 Smart URL behavior:
 - The server recommends concise slugs using `POST /url/recommend`
 - Then generates with full prompt context using `POST /content/generate` and the selected slug
 - This preserves rich prompt quality while producing readable/SEO-friendly URL paths
-- `generate_image_url` responses include the selected slug plus alternatives to help agents pick cleaner URLs when needed
+- `recommend_image_url` responses include the selected slug plus alternatives and explicitly report `generated: false`
 
 > "Generate a happy duck image and save it to ./images/duck.png"
 
@@ -154,11 +167,11 @@ The agent will:
 3. Save the image to the specified file path
 4. Return the URL and file path
 
-> "Create a hero image for my landing page" (using `create_image` alias)
+> "Create a hero image for my landing page"
 
 The agent will:
-1. Call `create_image` with just the description (defaults to 800x600 PNG)
-2. Poll until ready and save to a sensible default location
+1. Choose dimensions from the layout and call `generate_image`
+2. Poll until the hosted asset is ready
 3. Return the URL and file path
 
 > "Edit this local photo to remove the background and resize to 400x400"
