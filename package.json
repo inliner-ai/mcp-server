@@ -4,7 +4,7 @@
   "description": "MCP server for Inliner.ai — gives AI coding agents live access to your image projects, credits, and generation",
   "main": "dist/index.js",
   "bin": {
-    "inliner-mcp": "./dist/index.js"
+    "inliner-mcp": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -28,7 +28,7 @@
   "homepage": "https://inliner.ai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/inliner-ai/mcp-server"
+    "url": "git+https://github.com/inliner-ai/mcp-server.git"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
