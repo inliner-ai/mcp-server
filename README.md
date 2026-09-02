@@ -4,7 +4,7 @@ MCP server for [Inliner.ai](https://inliner.ai) — gives AI coding agents live 
 
 Works with any [Model Context Protocol](https://modelcontextprotocol.io) compatible tool: Claude Code, OpenAI Codex CLI, GitHub Copilot, Gemini CLI, Cursor, Windsurf, and more.
 
-Current release: `@inliner/mcp-server@1.1.1`, with 12 tools, model-facing initialization instructions, and MCP-safe structured results for array-valued API responses.
+Current release: `@inliner/mcp-server@1.2.0`, with 12 tools, inexpensive automatic routing, explicit model selection, model-facing initialization instructions, and MCP-safe structured results for array-valued API responses.
 
 For automatic activation guidance as well as tools, install the canonical [`inliner-ai` agent skill/plugin](https://github.com/inliner-ai/agent-skill). Codex users can install both layers together:
 
@@ -123,6 +123,41 @@ The server publishes initialization instructions that tell compatible agents how
 - Never create a project unless the user requests or approves it.
 
 Generation and editing consume the corresponding account credits. Read-only discovery and URL recommendation do not generate an asset.
+
+### Generation cost and model controls
+
+`generate_image` accepts two independent controls:
+
+- `mode: "cheap"` automatically routes general images to Z-Image Turbo, text/design-heavy images to Qwen Image, and reference-aware requests to Gemini Flash Lite.
+- `model` selects an exact image model. An explicit model always takes priority over `mode`.
+
+Example cheap request:
+
+```json
+{
+  "project": "my-project",
+  "description": "five professionals collaborating in a modern office",
+  "width": 1200,
+  "height": 800,
+  "format": "jpg",
+  "mode": "cheap"
+}
+```
+
+Example explicit model request:
+
+```json
+{
+  "project": "my-project",
+  "description": "editorial poster with precise typography",
+  "width": 1200,
+  "height": 800,
+  "format": "png",
+  "model": "IMAGE_GEN_QWEN_IMAGE"
+}
+```
+
+The inexpensive explicit model codes are `IMAGE_GEN_Z_IMAGE_TURBO`, `IMAGE_GEN_QWEN_IMAGE`, and `IMAGE_GEN_NANO_BANANA_LITE`.
 
 ## Tools
 

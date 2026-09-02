@@ -3,10 +3,24 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { createInterface } from "node:readline";
 
+const generationBodies = [];
 const fakeApi = createServer((req, res) => {
   res.setHeader("Content-Type", "application/json");
   if (req.url === "/account/plan-usage") {
     res.end(JSON.stringify([{ feature: "IMAGE", remaining: 42 }]));
+    return;
+  }
+  if (req.url === "/content/generate" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      const parsed = JSON.parse(body);
+      generationBodies.push(parsed);
+      res.end(JSON.stringify({
+        prompt: `${parsed.project}/${parsed.slug}.${parsed.extension}`,
+        mediaAsset: { data: "data:image/png;base64,aGVsbG8=" },
+      }));
+    });
     return;
   }
   res.statusCode = 404;
@@ -65,9 +79,10 @@ try {
 
   const initialized = await waitFor(1);
   assert.equal(initialized.result.serverInfo.name, "inliner");
-  assert.equal(initialized.result.serverInfo.version, "1.1.1");
+  assert.equal(initialized.result.serverInfo.version, "1.2.0");
   assert.match(initialized.result.instructions, /call generate_image/);
   assert.match(initialized.result.instructions, /recommend_image_url/);
+  assert.match(initialized.result.instructions, /mode=cheap/);
 
   send({ jsonrpc: "2.0", method: "notifications/initialized" });
   send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
@@ -79,6 +94,10 @@ try {
   assert(tools.has("recommend_image_url"));
   assert.match(tools.get("generate_image_url").description, /Deprecated/);
   assert.match(tools.get("create_image").description, /Deprecated/);
+  assert.deepEqual(tools.get("generate_image").inputSchema.properties.mode.enum, ["auto", "cheap"]);
+  assert(tools.get("generate_image").inputSchema.properties.model.enum.includes("IMAGE_GEN_Z_IMAGE_TURBO"));
+  assert(tools.get("generate_image").inputSchema.properties.model.enum.includes("IMAGE_GEN_QWEN_IMAGE"));
+  assert(tools.get("generate_image").inputSchema.properties.model.enum.includes("IMAGE_GEN_NANO_BANANA_LITE"));
 
   send({
     jsonrpc: "2.0",
@@ -113,6 +132,33 @@ try {
   assert.deepEqual(usage.result.structuredContent.data, [
     { feature: "IMAGE", remaining: 42 },
   ]);
+
+  send({
+    jsonrpc: "2.0",
+    id: 5,
+    method: "tools/call",
+    params: {
+      name: "generate_image",
+      arguments: {
+        project: "demo",
+        description: "budget-office-team",
+        width: 1200,
+        height: 800,
+        format: "png",
+        smartUrl: false,
+        mode: "cheap",
+        model: "IMAGE_GEN_QWEN_IMAGE",
+      },
+    },
+  });
+
+  const generated = await waitFor(5);
+  assert.equal(generated.result.structuredContent.generated, true);
+  assert.equal(generated.result.structuredContent.mode, "cheap");
+  assert.equal(generated.result.structuredContent.model, "IMAGE_GEN_QWEN_IMAGE");
+  assert.equal(generationBodies.length, 1);
+  assert.equal(generationBodies[0].mode, "cheap");
+  assert.equal(generationBodies[0].model, "IMAGE_GEN_QWEN_IMAGE");
 
   console.log(`Protocol smoke test passed with ${tools.size} tools.`);
 } finally {

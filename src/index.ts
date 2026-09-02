@@ -8,6 +8,33 @@ const API_BASE = process.env.INLINER_API_URL || "https://api.inliner.ai";
 const IMG_BASE = "https://img.inliner.ai";
 const DEFAULT_PROJECT = process.env.INLINER_DEFAULT_PROJECT;
 
+const IMAGE_MODEL_VALUES = [
+  "IMAGE_GEN_Z_IMAGE_TURBO",
+  "IMAGE_GEN_QWEN_IMAGE",
+  "IMAGE_GEN_NANO_BANANA_LITE",
+  "IMAGE_GEN_FLUX_PRO",
+  "IMAGE_GEN_GPT_IMAGE_2",
+  "IMAGE_GEN_KREA_2_MEDIUM",
+  "IMAGE_GEN_RECRAFT_V4_1_UTILITY",
+  "IMAGE_GEN_RECRAFT_V4_1_UTILITY_PRO",
+  "IMAGE_GEN_RECRAFT_V3",
+  "IMAGE_GEN_NANO_BANANA",
+  "IMAGE_GEN_RUNWAY_GEN4",
+] as const;
+
+type ImageGenerationMode = "auto" | "cheap";
+type ImageModel = typeof IMAGE_MODEL_VALUES[number];
+
+const imageGenerationModeInput = z
+  .enum(["auto", "cheap"])
+  .default("auto")
+  .describe("Routing policy. cheap automatically chooses Z-Image, Qwen, or Gemini Flash Lite by capability.");
+
+const imageModelInput = z
+  .enum(IMAGE_MODEL_VALUES)
+  .optional()
+  .describe("Optional exact model override. When provided, it takes priority over mode.");
+
 function getApiKey(): string {
   const key =
     process.env.INLINER_API_KEY ||
@@ -98,7 +125,9 @@ async function generateContentWithSmartSlug(
   height: number,
   format: "png" | "jpg",
   apiKey: string,
-  smartUrl: boolean = true
+  smartUrl: boolean = true,
+  mode: ImageGenerationMode = "auto",
+  model?: ImageModel
 ): Promise<{
   url: string;
   html: string;
@@ -123,6 +152,8 @@ async function generateContentWithSmartSlug(
       width,
       height,
       extension: format,
+      mode,
+      model,
     }),
   });
 
@@ -186,11 +217,11 @@ async function resolveProject(project: string | undefined, apiKey: string): Prom
 
 // --- Server setup ---
 
-const MCP_INSTRUCTIONS = `Use Inliner when the user requests a new or edited visual asset for code, UI, email, documentation, ecommerce, or marketing content. For a new asset, call generate_image so the account-owned URL is materialized before it is inserted. For a change to an identified existing asset, call edit_image. Use recommend_image_url only when the user explicitly wants a slug or URL recommendation; it does not generate an image. Resolve projects automatically and never create a project without user intent. Existing generated URLs may be embedded directly. Include useful dimensions and semantic alt text in code.`;
+const MCP_INSTRUCTIONS = `Use Inliner when the user requests a new or edited visual asset for code, UI, email, documentation, ecommerce, or marketing content. For a new asset, call generate_image so the account-owned URL is materialized before it is inserted. Use mode=cheap when the user asks for a low-cost or budget render; it automatically selects Z-Image, Qwen, or Gemini Flash Lite. Use model only when the user requests an exact model; an explicit model takes priority over mode. For a change to an identified existing asset, call edit_image. Use recommend_image_url only when the user explicitly wants a slug or URL recommendation; it does not generate an image. Resolve projects automatically and never create a project without user intent. Existing generated URLs may be embedded directly. Include useful dimensions and semantic alt text in code.`;
 
 const server = new McpServer({
   name: "inliner",
-  version: "1.1.1",
+  version: "1.2.0",
 }, {
   instructions: MCP_INSTRUCTIONS,
 });
@@ -343,8 +374,10 @@ server.tool(
       .boolean()
       .default(true)
       .describe("Use smart URL recommendation for concise, readable slugs"),
+    mode: imageGenerationModeInput,
+    model: imageModelInput,
   },
-  async ({ project, description, width, height, format, outputPath, smartUrl }) => {
+  async ({ project, description, width, height, format, outputPath, smartUrl, mode, model }) => {
     const resolvedProject = await resolveProject(project, apiKey);
     const generated = await generateContentWithSmartSlug(
       resolvedProject,
@@ -353,7 +386,9 @@ server.tool(
       height,
       format,
       apiKey,
-      smartUrl
+      smartUrl,
+      mode,
+      model
     );
 
     if (outputPath) {
@@ -379,6 +414,8 @@ server.tool(
       project: resolvedProject,
       recommendedSlug: generated.recommendedSlug || null,
       alternativeSlugs: generated.alternativeSlugs || [],
+      mode,
+      model: model || null,
     });
   }
 );
@@ -422,8 +459,10 @@ server.tool(
       .default(true)
       .optional()
       .describe("Use smart URL recommendation for concise, readable slugs"),
+    mode: imageGenerationModeInput.optional(),
+    model: imageModelInput,
   },
-  async ({ description, project, width = 800, height = 600, format = "png", outputPath, smartUrl = true }) => {
+  async ({ description, project, width = 800, height = 600, format = "png", outputPath, smartUrl = true, mode = "auto", model }) => {
     const finalProject = await resolveProject(project, apiKey);
 
     const generated = await generateContentWithSmartSlug(
@@ -433,7 +472,9 @@ server.tool(
       height,
       format,
       apiKey,
-      smartUrl
+      smartUrl,
+      mode,
+      model
     );
 
     // Save to file if outputPath is provided
@@ -461,6 +502,8 @@ server.tool(
       smartUrlUsed: smartUrl,
       recommendedSlug: generated.recommendedSlug || null,
       alternativeSlugs: generated.alternativeSlugs || [],
+      mode,
+      model: model || null,
     });
   }
 );
