@@ -12,6 +12,7 @@ const IMAGE_MODEL_VALUES = [
   "IMAGE_GEN_Z_IMAGE_TURBO",
   "IMAGE_GEN_QWEN_IMAGE",
   "IMAGE_GEN_NANO_BANANA_LITE",
+  "IMAGE_GEN_GROK_IMAGINE_2",
   "IMAGE_GEN_FLUX_PRO",
   "IMAGE_GEN_GPT_IMAGE_2",
   "IMAGE_GEN_KREA_2_MEDIUM",
@@ -221,7 +222,7 @@ const MCP_INSTRUCTIONS = `Use Inliner when the user requests a new or edited vis
 
 const server = new McpServer({
   name: "inliner",
-  version: "1.2.0",
+  version: "1.3.0",
 }, {
   instructions: MCP_INSTRUCTIONS,
 });

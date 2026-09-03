@@ -4,7 +4,7 @@ MCP server for [Inliner.ai](https://inliner.ai) — gives AI coding agents live 
 
 Works with any [Model Context Protocol](https://modelcontextprotocol.io) compatible tool: Claude Code, OpenAI Codex CLI, GitHub Copilot, Gemini CLI, Cursor, Windsurf, and more.
 
-Current release: `@inliner/mcp-server@1.2.0`, with 12 tools, inexpensive automatic routing, explicit model selection, model-facing initialization instructions, and MCP-safe structured results for array-valued API responses.
+Current release: `@inliner/mcp-server@1.3.0`, with 12 tools, inexpensive automatic routing, explicit model selection (including Grok Imagine Image 2.0), model-facing initialization instructions, and MCP-safe structured results for array-valued API responses.
 
 For automatic activation guidance as well as tools, install the canonical [`inliner-ai` agent skill/plugin](https://github.com/inliner-ai/agent-skill). Codex users can install both layers together:
 
@@ -157,7 +157,7 @@ Example explicit model request:
 }
 ```
 
-The inexpensive explicit model codes are `IMAGE_GEN_Z_IMAGE_TURBO`, `IMAGE_GEN_QWEN_IMAGE`, and `IMAGE_GEN_NANO_BANANA_LITE`.
+The inexpensive explicit model codes are `IMAGE_GEN_Z_IMAGE_TURBO`, `IMAGE_GEN_QWEN_IMAGE`, and `IMAGE_GEN_NANO_BANANA_LITE`. For a reference-aware quality/value option, use `IMAGE_GEN_GROK_IMAGINE_2` (Grok Imagine Image 2.0 through OpenRouter, using 1K/low by default).
 
 ## Tools
 

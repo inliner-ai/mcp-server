@@ -79,7 +79,7 @@ try {
 
   const initialized = await waitFor(1);
   assert.equal(initialized.result.serverInfo.name, "inliner");
-  assert.equal(initialized.result.serverInfo.version, "1.2.0");
+  assert.equal(initialized.result.serverInfo.version, "1.3.0");
   assert.match(initialized.result.instructions, /call generate_image/);
   assert.match(initialized.result.instructions, /recommend_image_url/);
   assert.match(initialized.result.instructions, /mode=cheap/);
@@ -98,6 +98,7 @@ try {
   assert(tools.get("generate_image").inputSchema.properties.model.enum.includes("IMAGE_GEN_Z_IMAGE_TURBO"));
   assert(tools.get("generate_image").inputSchema.properties.model.enum.includes("IMAGE_GEN_QWEN_IMAGE"));
   assert(tools.get("generate_image").inputSchema.properties.model.enum.includes("IMAGE_GEN_NANO_BANANA_LITE"));
+  assert(tools.get("generate_image").inputSchema.properties.model.enum.includes("IMAGE_GEN_GROK_IMAGINE_2"));
 
   send({
     jsonrpc: "2.0",

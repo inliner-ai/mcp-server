@@ -11,6 +11,7 @@ const IMAGE_MODEL_VALUES = [
     "IMAGE_GEN_Z_IMAGE_TURBO",
     "IMAGE_GEN_QWEN_IMAGE",
     "IMAGE_GEN_NANO_BANANA_LITE",
+    "IMAGE_GEN_GROK_IMAGINE_2",
     "IMAGE_GEN_FLUX_PRO",
     "IMAGE_GEN_GPT_IMAGE_2",
     "IMAGE_GEN_KREA_2_MEDIUM",
@@ -171,7 +172,7 @@ async function resolveProject(project, apiKey) {
 const MCP_INSTRUCTIONS = `Use Inliner when the user requests a new or edited visual asset for code, UI, email, documentation, ecommerce, or marketing content. For a new asset, call generate_image so the account-owned URL is materialized before it is inserted. Use mode=cheap when the user asks for a low-cost or budget render; it automatically selects Z-Image, Qwen, or Gemini Flash Lite. Use model only when the user requests an exact model; an explicit model takes priority over mode. For a change to an identified existing asset, call edit_image. Use recommend_image_url only when the user explicitly wants a slug or URL recommendation; it does not generate an image. Resolve projects automatically and never create a project without user intent. Existing generated URLs may be embedded directly. Include useful dimensions and semantic alt text in code.`;
 const server = new mcp_js_1.McpServer({
     name: "inliner",
-    version: "1.2.0",
+    version: "1.3.0",
 }, {
     instructions: MCP_INSTRUCTIONS,
 });
